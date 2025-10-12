@@ -1,29 +1,39 @@
 mod db;
 mod models;
 mod calc;
-mod routes;
 mod errors;
+mod routes;
 
-use axum::{Router, extract::State};
-use dotenvy::dotenv;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use std::net::SocketAddr;
+use db::init_db;
+use tokio;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    dotenv().ok();
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+fn main() {
+    // --- FMEDA Resistor FIT Verification Example ---
+    use crate::models::{Component, MissionProfile};
+    use crate::calc::sn29500::calc_resistor;
+    use uuid::Uuid;
+    use chrono::Utc;
 
-    let pool = db::init_pool().await?;
-    let app = Router::new()
-        .merge(routes::router())
-        .with_state(pool.clone());
-
-    let addr: SocketAddr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8081".into()).parse()?;
-    tracing::info!("Engine listening on {}", addr);
-    axum::Server::bind(&addr).serve(app.into_make_service()).await?;
-    Ok(())
+    let component = Component {
+        id: Uuid::new_v4(),
+        project_id: Uuid::new_v4(),
+        manufacturer_part_number: "R-1234".to_string(),
+        manufacturer: Some("TestManu".to_string()),
+        reference_designator: Some("R1".to_string()),
+        quantity: 1,
+        created_at: Utc::now(),
+        component_type: "Resistor".to_string(),
+        base_fit: None,
+        quality_factor: None,
+        resistor_type: Some("metal film".to_string()),
+    };
+    let profile = MissionProfile {
+        temperature_factor: None,
+        environment_factor: None,
+        stress_factor: None,
+        reference_temp: None,
+        operating_temp: Some(40.0), // Theta2 in °C, set to 40.0 to match thetaref
+    };
+    let fit = calc_resistor(&component, &profile);
+    println!("[FMEDA] Calculated FIT for Resistor: {}", fit);
 }
