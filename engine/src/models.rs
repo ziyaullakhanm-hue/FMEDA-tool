@@ -1,7 +1,13 @@
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
 use uuid::Uuid;
-use chrono::DateTime;
-use chrono::Utc;
+use bigdecimal::{BigDecimal, ToPrimitive};
+use serde_json::Value;
+use std::collections::HashMap;
+use chrono::{DateTime, Utc};
+use sqlx::types::JsonValue;
+use sqlx::PgPool;
+
+// ------------------- Structs -------------------
 
 #[derive(sqlx::FromRow, Serialize, Deserialize, Debug)]
 pub struct Project {
@@ -21,20 +27,26 @@ pub struct Component {
     pub quantity: i32,
     pub created_at: DateTime<Utc>,
 
-    // Added for calculation
-    pub component_type: String, // e.g., "Resistor", "Capacitor", "IC"
-    pub base_fit: Option<f64>,
-    pub quality_factor: Option<f64>,
-    pub resistor_type: Option<String>, // e.g., "carbon film", "metal film", etc.
+    pub component_type: String,
+    pub base_fit: Option<BigDecimal>,
+    pub quality_factor: Option<BigDecimal>,
+    pub resistor_type: Option<String>,
+    pub mission_profile_id: Option<Uuid>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(sqlx::FromRow, Serialize, Deserialize, Debug, Clone)]
 pub struct MissionProfile {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub temp_tau_profile: Option<JsonValue>,
+    pub created_at: DateTime<Utc>,
+
     pub temperature_factor: Option<f64>,
     pub environment_factor: Option<f64>,
     pub stress_factor: Option<f64>,
-    pub reference_temp: Option<f64>, // Reference temperature (thetaref) in °C
-    pub operating_temp: Option<f64>, // Actual operating temperature (theta) in °C
+    pub reference_temp: Option<f64>,
+    pub operating_temp: Option<f64>,
 }
 
 #[derive(sqlx::FromRow, Serialize, Deserialize, Debug)]
@@ -52,37 +64,83 @@ pub struct FailureMode {
 pub struct Calculation {
     pub id: Uuid,
     pub project_id: Uuid,
-    pub payload: serde_json::Value,
-    pub result: serde_json::Value,
+    pub payload: Value,
+    pub result: Value,
     pub created_at: DateTime<Utc>,
 }
 
-// --- FMEDA Prediction Example ---
-use std::collections::HashMap;
+// ------------------- Database Functions -------------------
 
-/// Example result struct for FMEDA prediction
+impl Component {
+    /// Fetch a single component by ID
+    pub async fn fetch(pool: &PgPool, id: Uuid) -> Result<Self, sqlx::Error> {
+        let row = sqlx::query_as!(
+            Component,
+            r#"
+            SELECT id, project_id, manufacturer_part_number, manufacturer,
+                   reference_designator, quantity, created_at,
+                   component_type, base_fit, quality_factor, resistor_type,
+                   mission_profile_id
+            FROM components
+            WHERE id = $1
+            "#,
+            id
+        )
+        .fetch_one(pool)
+        .await?;
+
+        Ok(row)
+    }
+}
+
+impl MissionProfile {
+    /// Fetch a single mission profile by ID including temperature_factor
+    pub async fn fetch(pool: &PgPool, id: Uuid) -> Result<Self, sqlx::Error> {
+        let row = sqlx::query_as!(
+            MissionProfile,
+            r#"
+            SELECT id, name, description, temp_tau_profile, created_at,
+                   temperature_factor, environment_factor, stress_factor,
+                   reference_temp, operating_temp
+            FROM mission_profiles
+            WHERE id = $1
+            "#,
+            id
+        )
+        .fetch_one(pool)
+        .await?;
+
+        Ok(row)
+    }
+}
+
+// ------------------- FMEDA Prediction -------------------
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FMEDAPredictionResult {
     pub component_id: Uuid,
     pub total_fit: f64,
-    pub failure_modes: HashMap<String, f64>, // mode -> FIT
+    pub failure_modes: HashMap<String, f64>,
 }
 
-/// Example FMEDA prediction function
 pub fn predict_fmeda(
     component: &Component,
     profile: &MissionProfile,
     failure_modes: &[FailureMode],
 ) -> FMEDAPredictionResult {
-    // Calculate base FIT (could use SN29500 or other model)
-    let base_fit = component.base_fit.unwrap_or(1.0);
-    let quality = component.quality_factor.unwrap_or(1.0);
+    let base_fit = component.base_fit.clone().unwrap_or_else(|| BigDecimal::from(1));
+    let quality = component.quality_factor.clone().unwrap_or_else(|| BigDecimal::from(1));
     let temp = profile.temperature_factor.unwrap_or(1.0);
     let env = profile.environment_factor.unwrap_or(1.0);
     let stress = profile.stress_factor.unwrap_or(1.0);
-    let total_fit = base_fit * quality * temp * env * stress * component.quantity as f64;
 
-    // Distribute FIT to failure modes (example: lambda is a fraction)
+    let total_fit = base_fit.to_f64().unwrap_or(1.0)
+        * quality.to_f64().unwrap_or(1.0)
+        * temp
+        * env
+        * stress
+        * component.quantity as f64;
+
     let mut failure_modes_fit = HashMap::new();
     let lambda_sum: f64 = failure_modes.iter().map(|fm| fm.lambda).sum();
     for fm in failure_modes {
