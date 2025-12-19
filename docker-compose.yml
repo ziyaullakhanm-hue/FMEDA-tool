@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: safecrate-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: safeuser
+      POSTGRES_PASSWORD: safepass
+      POSTGRES_DB: safecrate
+    ports:
+      - "5432:5432"
+    volumes:
+      - safecrate_pgdata:/var/lib/postgresql/data
+      # Mount the single-file dump into the init directory so it is applied on first run
+      - ./db/dump.sql:/docker-entrypoint-initdb.d/01-dump.sql:ro
+
+volumes:
+  safecrate_pgdata:
+    name: safecrate_pgdata
