@@ -16,6 +16,24 @@ services:
       # Mount the single-file dump into the init directory so it is applied on first run
       - ./db/dump.sql:/docker-entrypoint-initdb.d/01-dump.sql:ro
 
+  langgraph:
+    build:
+      context: ./langgraph-service
+      dockerfile: Dockerfile
+    container_name: safecrate-langgraph
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://safeuser:safepass@db:5432/safecrate
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LLM_MODEL: gpt-4
+      DEBUG: "False"
+    ports:
+      - "8001:8001"
+    depends_on:
+      - db
+    volumes:
+      - ./langgraph-service:/app
+
 volumes:
   safecrate_pgdata:
     name: safecrate_pgdata

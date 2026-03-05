@@ -21,18 +21,25 @@
 //   )
 // }
 
-// src/App.tsx
 import Sidebar from "./components/Sidebar";
+import Header from "./components/Header";
 import { Outlet } from "react-router-dom";
+import { useState } from "react";
 
 export default function App() {
+  const [collapsed, setCollapsed] = useState(false);
+
   return (
-    <div className="flex h-screen">
-      <Sidebar />
-      <main className="flex-1 p-6 bg-gray-100 overflow-y-auto">
-        <Outlet />
-      </main>
+    <div className="flex flex-col h-screen bg-slate-50">
+      <Header /> {/* Full width header */}
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar collapsed={collapsed} setCollapsed={setCollapsed} />
+        <main className="flex-1 overflow-y-auto p-6">
+           <div className="max-w-7xl mx-auto">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
-

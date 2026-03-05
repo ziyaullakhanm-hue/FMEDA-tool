@@ -175,7 +175,7 @@ pub struct Project {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(sqlx::FromRow, Serialize, Deserialize, Debug)]
+#[derive(sqlx::FromRow, Serialize, Deserialize, Debug, Clone)]
 pub struct Component {
     pub id: Uuid,
     pub project_id: Uuid,
